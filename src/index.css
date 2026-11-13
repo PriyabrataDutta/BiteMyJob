@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Noto Serif", Georgia, Cambria, "Times New Roman", serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-label: "Public Sans", "Inter", sans-serif;
+
+  --color-primary: #094cb2;
+  --color-primary-container: #1d63d0;
+  --color-tertiary: #6d5e00;
+  --color-tertiary-surface: #fbf6dc;
+  --color-surface-lowest: #ffffff;
+  --color-surface-low: #f3f5f9;
+  --color-surface: #eceff5;
+  --color-surface-high: #e3e7f0;
+  --color-surface-dim: #d8dde9;
+  --color-on-surface: #141923;
+  --color-on-surface-muted: #4d5566;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    color: var(--color-on-surface);
+    background-color: var(--color-surface-low);
+  }
+
+  h1, h2, .font-editorial {
+    font-family: var(--font-serif);
+  }
+
+  .font-label {
+    font-family: var(--font-label);
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Ghost border utility per Alexandria design system */
+.ghost-border {
+  border: 1px solid rgba(20, 25, 35, 0.15);
+}
+
+.ghost-border-focus:focus {
+  border-color: #094cb2;
+  outline: 2px solid rgba(9, 76, 178, 0.14);
+  outline-offset: 0px;
+}
+
+/* Diffused modal shadow per Alexandria design system */
+.alexandria-modal-shadow {
+  box-shadow: 0 28px 48px -8px rgba(20, 25, 35, 0.08), 0 12px 24px -6px rgba(20, 25, 35, 0.05);
+}
+
+/* Subtle horizontal scrollbar for interview strip */
+.editorial-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.editorial-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editorial-scroll::-webkit-scrollbar-thumb {
+  background: rgba(20, 25, 35, 0.14);
+  border-radius: 9999px;
+}
