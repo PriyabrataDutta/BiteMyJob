@@ -1,21 +1,29 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
+import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ApplicationCard } from './components/ApplicationCard';
 import { ApplicationDrawer } from './components/ApplicationDrawer';
 import { ApplicationLedger } from './components/ApplicationLedger';
 import { ApplicationModal } from './components/ApplicationModal';
 import { IdleAlertsBanner } from './components/IdleAlertsBanner';
 import { InterviewsStrip } from './components/InterviewsStrip';
+import { JobPreparationView } from './components/JobPreparationView';
+import { MockInterviewView } from './components/MockInterviewView';
+import { Pagination } from './components/Pagination';
+import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { QuickFilter, WorkspaceToolbar } from './components/WorkspaceToolbar';
 import {
+  ApplicationPrepRecord,
   ApplicationStage,
   JobApplication,
   JobDescriptionInsights,
+  MockInterviewSession,
   NavSection,
   SortOption,
   ViewMode,
 } from './types/application';
+import { getNextHighestStage } from './utils/analytics';
 import {
   addDaysToISO,
   diffCalendarDays,
@@ -25,22 +33,38 @@ import {
   isUpcomingInterview,
 } from './utils/dateUtils';
 import {
+  createDefaultPrepRecord,
   loadApplications,
+  loadMockSessions,
+  loadPrepRecords,
+  loadResumePresets,
   loadSettings,
   normalizeApplication,
   saveApplications,
+  saveMockSessions,
+  savePrepRecords,
+  saveResumePresets,
   saveSettings,
 } from './utils/storage';
 
 export default function App() {
   const [applications, setApplications] = useState<JobApplication[]>(() => loadApplications());
   const [settings, setSettings] = useState(() => loadSettings());
+  const [prepRecords, setPrepRecords] = useState<Record<string, ApplicationPrepRecord>>(() =>
+    loadPrepRecords()
+  );
+  const [resumePresets, setResumePresets] = useState<string[]>(() => loadResumePresets());
+  const [mockSessions, setMockSessions] = useState<MockInterviewSession[]>(() =>
+    loadMockSessions()
+  );
 
   const [activeNav, setActiveNav] = useState<NavSection>('all');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
   const [stageFilter, setStageFilter] = useState<ApplicationStage | 'All'>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('follow-up');
+  const [currentPage, setCurrentPage] = useState(1);
   const [idleBannerDismissed, setIdleBannerDismissed] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -56,6 +80,18 @@ export default function App() {
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    savePrepRecords(prepRecords);
+  }, [prepRecords]);
+
+  useEffect(() => {
+    saveResumePresets(resumePresets);
+  }, [resumePresets]);
+
+  useEffect(() => {
+    saveMockSessions(mockSessions);
+  }, [mockSessions]);
 
   useEffect(() => {
     if (!toastMessage) return;
@@ -108,6 +144,7 @@ export default function App() {
   // Synchronize top navigation tabs with workspace filter
   const handleSelectNav = (nav: NavSection) => {
     setActiveNav(nav);
+    setCurrentPage(1);
     if (nav === 'all') setQuickFilter('all');
     if (nav === 'follow-ups') setQuickFilter('attention');
     if (nav === 'idle') setQuickFilter('idle');
@@ -116,6 +153,7 @@ export default function App() {
 
   const handleQuickFilterChange = (filter: QuickFilter) => {
     setQuickFilter(filter);
+    setCurrentPage(1);
     if (filter === 'all') setActiveNav('all');
     else if (filter === 'attention' || filter === 'due-today' || filter === 'overdue')
       setActiveNav('follow-ups');
@@ -193,6 +231,20 @@ export default function App() {
     settings.idleThresholdDays,
   ]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredApplications.length / settings.pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedApplications = useMemo(() => {
+    const start = (safePage - 1) * settings.pageSize;
+    return filteredApplications.slice(start, start + settings.pageSize);
+  }, [filteredApplications, safePage, settings.pageSize]);
+
   // Handlers
   const openNewApplicationModal = (forInterview = false) => {
     setEditingApp(null);
@@ -214,13 +266,24 @@ export default function App() {
     if (existingId) {
       setApplications((prev) =>
         prev.map((item) =>
-          item.id === existingId ? { ...item, ...data, updatedAt: nowIso } : item
+          item.id === existingId
+            ? {
+                ...item,
+                ...data,
+                highestStageReached: getNextHighestStage(
+                  item.highestStageReached ?? item.stage,
+                  data.stage
+                ),
+                updatedAt: nowIso,
+              }
+            : item
         )
       );
       setToastMessage(`Updated ${data.company} — ${data.role}`);
     } else {
       const created: JobApplication = {
         ...data,
+        highestStageReached: getNextHighestStage(undefined, data.stage),
         id: `bmj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -275,6 +338,10 @@ export default function App() {
           ? {
               ...item,
               stage: nextStage,
+              highestStageReached: getNextHighestStage(
+                item.highestStageReached ?? item.stage,
+                nextStage
+              ),
               lastActivityDate: todayISO,
               updatedAt: nowIso,
             }
@@ -304,6 +371,68 @@ export default function App() {
     if (aiInsights) {
       setToastMessage('Extracted key skills, 3 interview questions, and follow-up draft');
     }
+  };
+
+  const handleUpdatePrepRecord = (
+    appId: string,
+    updater: (current: ApplicationPrepRecord) => ApplicationPrepRecord
+  ) => {
+    const targetApp = applications.find((a) => a.id === appId);
+    if (!targetApp) return;
+    setPrepRecords((prev) => {
+      const base = prev[appId] ?? createDefaultPrepRecord(targetApp);
+      return {
+        ...prev,
+        [appId]: updater(base),
+      };
+    });
+  };
+
+  const handleMarkQuestionRehearsed = (appId: string, questionId: string) => {
+    handleUpdatePrepRecord(appId, (record) => ({
+      ...record,
+      practiceQuestions: record.practiceQuestions.map((q) =>
+        q.id === questionId ? { ...q, rehearsed: true } : q
+      ),
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  const handleAddResumePreset = (preset: string) => {
+    const cleaned = preset.trim();
+    if (!cleaned) return;
+    setResumePresets((prev) => (prev.includes(cleaned) ? prev : [...prev, cleaned]));
+    setToastMessage(`Saved resume preset "${cleaned}"`);
+  };
+
+  const handleRemoveResumePreset = (preset: string) => {
+    setResumePresets((prev) => prev.filter((item) => item !== preset));
+  };
+
+  const handleSaveMockSession = (session: MockInterviewSession) => {
+    setMockSessions((prev) => [session, ...prev]);
+    setToastMessage(
+      `Saved mock session (${session.overallAverage.toFixed(1)}/5) for ${session.company}`
+    );
+  };
+
+  const handleDeleteMockSession = (sessionId: string) => {
+    setMockSessions((prev) => prev.filter((s) => s.id !== sessionId));
+  };
+
+  const handleReloadFromStorage = () => {
+    const loadedApps = loadApplications();
+    const loadedSettings = loadSettings();
+    const loadedPrep = loadPrepRecords();
+    const loadedPresets = loadResumePresets();
+    const loadedMockSessions = loadMockSessions();
+    setApplications(loadedApps);
+    setSettings(loadedSettings);
+    setPrepRecords(loadedPrep);
+    setResumePresets(loadedPresets);
+    setMockSessions(loadedMockSessions);
+    setCurrentPage(1);
+    setToastMessage(`Loaded ${loadedApps.length} applications from localStorage`);
   };
 
   const handleExportJson = () => {
@@ -360,200 +489,287 @@ export default function App() {
     (a) => a.stage !== 'Rejected' && a.stage !== 'Withdrawn'
   ).length;
 
+  const isStudioTab = activeNav === 'prep' || activeNav === 'mock' || activeNav === 'analytics';
+
   return (
-    <div id="top" className="min-h-screen bg-[#F3F5F9] text-[#141923]">
-      <TopBar
+    <div id="top" className="min-h-screen bg-[#F3F5F9] text-[#141923] flex">
+      <Sidebar
         activeNav={activeNav}
         onSelectNav={handleSelectNav}
-        onNewApplication={() => openNewApplicationModal(false)}
+        mobileOpen={mobileSidebarOpen}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
+        counts={{
+          all: applications.length,
+          followUps: dueTodayApps.length + overdueApps.length,
+          idle: idleApps.length,
+          interviews: upcomingInterviews.length,
+          mockSessions: mockSessions.length,
+        }}
       />
 
-      {/* Editorial Overview Header Surface */}
-      <section className="bg-white pb-8 pt-7">
-        <div className="mx-auto max-w-[1360px] px-6 lg:px-10">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-2xl">
-              <p className="font-label text-xs font-semibold text-[#094CB2]">
-                Career Ledger · Active Search
-              </p>
-              <h1 className="mt-2 font-serif text-3xl font-semibold tracking-tight text-[#141923] sm:text-4xl [text-wrap:balance]">
-                Curated Application Dossier &amp; Follow-Up Cadence
-              </h1>
-              <p className="mt-2.5 text-sm leading-relaxed text-[#4D5566]">
-                Track every active candidacy, keep follow-up commitments visible, catch silent
-                pipelines early, and walk into interviews prepared.
-              </p>
-            </div>
-
-            {/* Quiet Tonal Metric Row */}
-            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-md bg-[#F3F5F9] px-4 py-3">
-                <dt className="font-label text-[11px] font-medium text-[#4D5566]">Active Roles</dt>
-                <dd className="mt-1 font-serif text-2xl font-semibold text-[#141923] tabular-nums">
-                  {activeCount}
-                </dd>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFilterChange('due-today')}
-                className="rounded-md bg-[#FBF6DC] px-4 py-3 text-left transition-colors hover:bg-[#F7EEBE] cursor-pointer"
-              >
-                <dt className="font-label text-[11px] font-medium text-[#6D5E00]">Due Today</dt>
-                <dd className="mt-1 font-serif text-2xl font-semibold text-[#6D5E00] tabular-nums">
-                  {dueTodayApps.length}
-                </dd>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFilterChange('overdue')}
-                className="rounded-md bg-[#FDF1F2] px-4 py-3 text-left transition-colors hover:bg-[#FBE2E5] cursor-pointer"
-              >
-                <dt className="font-label text-[11px] font-medium text-[#9F1239]">Overdue</dt>
-                <dd className="mt-1 font-serif text-2xl font-semibold text-[#9F1239] tabular-nums">
-                  {overdueApps.length}
-                </dd>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFilterChange('idle')}
-                className="rounded-md bg-[#ECEFF5] px-4 py-3 text-left transition-colors hover:bg-[#E3E7F0] cursor-pointer"
-              >
-                <dt className="font-label text-[11px] font-medium text-[#4D5566]">
-                  Idle ({settings.idleThresholdDays}d+)
-                </dt>
-                <dd className="mt-1 font-serif text-2xl font-semibold text-[#141923] tabular-nums">
-                  {idleApps.length}
-                </dd>
-              </button>
-            </dl>
-          </div>
-
-          {/* Upcoming Interviews Summary Strip */}
-          <div className="mt-7">
-            <InterviewsStrip
-              interviews={upcomingInterviews}
-              onSelectApplication={(app) => setSelectedDossierId(app.id)}
-              onScheduleInterview={() => openNewApplicationModal(true)}
-              onViewAllInterviews={() => handleQuickFilterChange('interviews')}
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* Main Workspace Canvas */}
-      <main className="mx-auto max-w-[1360px] space-y-6 px-6 py-8 lg:px-10">
-        {/* Idle Applications Alert Banner */}
-        {!idleBannerDismissed && idleApps.length > 0 && (
-          <IdleAlertsBanner
-            idleApps={idleApps}
-            idleThresholdDays={settings.idleThresholdDays}
-            onChangeThreshold={(days) =>
-              setSettings((prev) => ({ ...prev, idleThresholdDays: days }))
-            }
-            onFilterIdle={() => handleQuickFilterChange('idle')}
-            onQuickCheckIn={handleMarkFollowedUp}
-            onSelectApplication={(app) => setSelectedDossierId(app.id)}
-            onDismiss={() => setIdleBannerDismissed(true)}
-          />
-        )}
-
-        {/* Workspace Toolbar */}
-        <WorkspaceToolbar
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          quickFilter={quickFilter}
-          onQuickFilterChange={handleQuickFilterChange}
-          stageFilter={stageFilter}
-          onStageFilterChange={setStageFilter}
-          sortBy={sortBy}
-          onSortChange={setSortBy}
-          viewMode={settings.viewMode}
-          onViewModeChange={(viewMode: ViewMode) =>
-            setSettings((prev) => ({ ...prev, viewMode }))
-          }
-          counts={{
-            all: applications.length,
-            dueToday: dueTodayApps.length,
-            overdue: overdueApps.length,
-            idle: idleApps.length,
-            interviews: upcomingInterviews.length,
-          }}
-          onExportJson={handleExportJson}
-          onImportJson={handleImportJson}
+      <div className="flex-1 min-w-0 flex flex-col">
+        <TopBar
+          activeNav={activeNav}
+          onOpenMobileMenu={() => setMobileSidebarOpen(true)}
+          onNewApplication={() => openNewApplicationModal(false)}
         />
 
-        {/* Application Grid or Ledger */}
-        {filteredApplications.length === 0 ? (
-          <div className="rounded-lg bg-white px-6 py-14 text-center">
-            <h2 className="font-serif text-xl font-semibold text-[#141923]">
-              No applications match this view
-            </h2>
-            <p className="mx-auto mt-2 max-w-md text-sm text-[#4D5566]">
-              Clear your active filters or log a new job application to start tracking follow-up
-              dates and interview schedules.
-            </p>
-            <div className="mt-6 flex items-center justify-center gap-3">
-              {(quickFilter !== 'all' || stageFilter !== 'All' || searchQuery) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuickFilter('all');
-                    setStageFilter('All');
-                    setSearchQuery('');
-                    setActiveNav('all');
-                  }}
-                  className="rounded-md bg-[#E3E7F0] px-4 py-2 text-sm font-medium text-[#094CB2] hover:bg-[#D8DDE9] cursor-pointer"
-                >
-                  Reset Filters
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => openNewApplicationModal(false)}
-                className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#094CB2] to-[#1D63D0] px-4 py-2 text-sm font-medium text-white hover:opacity-95 cursor-pointer"
-              >
-                <Plus className="h-4 w-4" aria-hidden="true" />
-                <span>Log Application</span>
-              </button>
+        {/* Editorial Overview Header Surface (Ledger Views) */}
+        {!isStudioTab && (
+          <section className="bg-white pb-8 pt-7">
+            <div className="mx-auto max-w-[1360px] px-6 lg:px-10">
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+                <div className="max-w-2xl">
+                  <p className="font-label text-xs font-semibold text-[#094CB2]">
+                    Career Ledger · Active Search
+                  </p>
+                  <h1 className="mt-2 font-serif text-3xl font-semibold tracking-tight text-[#141923] sm:text-4xl [text-wrap:balance]">
+                    Curated Application Dossier &amp; Follow-Up Cadence
+                  </h1>
+                  <p className="mt-2.5 text-sm leading-relaxed text-[#4D5566]">
+                    Track every active candidacy, keep follow-up commitments visible, catch silent
+                    pipelines early, and walk into interviews prepared.
+                  </p>
+                </div>
+
+                {/* Quiet Tonal Metric Row */}
+                <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="rounded-md bg-[#F3F5F9] px-4 py-3">
+                    <dt className="font-label text-[11px] font-medium text-[#4D5566]">
+                      Active Roles
+                    </dt>
+                    <dd className="mt-1 font-serif text-2xl font-semibold text-[#141923] tabular-nums">
+                      {activeCount}
+                    </dd>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleQuickFilterChange('due-today')}
+                    className="rounded-md bg-[#FBF6DC] px-4 py-3 text-left transition-colors hover:bg-[#F7EEBE] cursor-pointer"
+                  >
+                    <dt className="font-label text-[11px] font-medium text-[#6D5E00]">Due Today</dt>
+                    <dd className="mt-1 font-serif text-2xl font-semibold text-[#6D5E00] tabular-nums">
+                      {dueTodayApps.length}
+                    </dd>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleQuickFilterChange('overdue')}
+                    className="rounded-md bg-[#FDF1F2] px-4 py-3 text-left transition-colors hover:bg-[#FBE2E5] cursor-pointer"
+                  >
+                    <dt className="font-label text-[11px] font-medium text-[#9F1239]">Overdue</dt>
+                    <dd className="mt-1 font-serif text-2xl font-semibold text-[#9F1239] tabular-nums">
+                      {overdueApps.length}
+                    </dd>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleQuickFilterChange('idle')}
+                    className="rounded-md bg-[#ECEFF5] px-4 py-3 text-left transition-colors hover:bg-[#E3E7F0] cursor-pointer"
+                  >
+                    <dt className="font-label text-[11px] font-medium text-[#4D5566]">
+                      Idle ({settings.idleThresholdDays}d+)
+                    </dt>
+                    <dd className="mt-1 font-serif text-2xl font-semibold text-[#141923] tabular-nums">
+                      {idleApps.length}
+                    </dd>
+                  </button>
+                </dl>
+              </div>
+
+              {/* Upcoming Interviews Summary Strip */}
+              <div className="mt-7">
+                <InterviewsStrip
+                  interviews={upcomingInterviews}
+                  onSelectApplication={(app) => setSelectedDossierId(app.id)}
+                  onScheduleInterview={() => openNewApplicationModal(true)}
+                  onViewAllInterviews={() => handleQuickFilterChange('interviews')}
+                  onExportIcsNotice={setToastMessage}
+                />
+              </div>
             </div>
-          </div>
-        ) : settings.viewMode === 'board' ? (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {filteredApplications.map((app) => (
-              <ApplicationCard
-                key={app.id}
-                application={app}
-                idleThresholdDays={settings.idleThresholdDays}
-                onOpenDossier={(selected) => setSelectedDossierId(selected.id)}
-                onEdit={openEditModal}
-                onUpdateFollowUp={handleUpdateFollowUp}
-                onMarkFollowedUp={handleMarkFollowedUp}
-                onStageChange={handleStageChange}
-                onSaveJdInsights={handleSaveJdInsights}
-              />
-            ))}
-          </div>
-        ) : (
-          <ApplicationLedger
-            applications={filteredApplications}
-            idleThresholdDays={settings.idleThresholdDays}
-            onOpenDossier={(selected) => setSelectedDossierId(selected.id)}
-            onEdit={openEditModal}
-            onUpdateFollowUp={handleUpdateFollowUp}
-            onMarkFollowedUp={handleMarkFollowedUp}
-            onStageChange={handleStageChange}
-          />
+          </section>
         )}
-      </main>
+
+        {/* Main Workspace Canvas */}
+        <main className="mx-auto w-full max-w-[1360px] space-y-6 px-6 py-8 lg:px-10">
+          {activeNav === 'prep' ? (
+            <JobPreparationView
+              applications={applications}
+              prepRecords={prepRecords}
+              onUpdatePrepRecord={handleUpdatePrepRecord}
+              onSaveJdInsights={handleSaveJdInsights}
+              onOpenNewApplication={() => openNewApplicationModal(false)}
+            />
+          ) : activeNav === 'mock' ? (
+            <MockInterviewView
+              applications={applications}
+              prepRecords={prepRecords}
+              mockSessions={mockSessions}
+              onSaveMockSession={handleSaveMockSession}
+              onDeleteMockSession={handleDeleteMockSession}
+              onMarkQuestionRehearsed={handleMarkQuestionRehearsed}
+              onOpenNewApplication={() => openNewApplicationModal(false)}
+            />
+          ) : activeNav === 'analytics' ? (
+            <AnalyticsDashboard
+              applications={applications}
+              mockSessions={mockSessions}
+              resumePresets={resumePresets}
+              onAddResumePreset={handleAddResumePreset}
+              onRemoveResumePreset={handleRemoveResumePreset}
+              onBackToLedger={() => handleSelectNav('all')}
+              onOpenApplication={(app) => openEditModal(app)}
+            />
+          ) : (
+            <>
+            {/* Idle Applications Alert Banner */}
+            {!idleBannerDismissed && idleApps.length > 0 && (
+              <IdleAlertsBanner
+                idleApps={idleApps}
+                idleThresholdDays={settings.idleThresholdDays}
+                onChangeThreshold={(days) =>
+                  setSettings((prev) => ({ ...prev, idleThresholdDays: days }))
+                }
+                onFilterIdle={() => handleQuickFilterChange('idle')}
+                onQuickCheckIn={handleMarkFollowedUp}
+                onSelectApplication={(app) => setSelectedDossierId(app.id)}
+                onDismiss={() => setIdleBannerDismissed(true)}
+              />
+            )}
+
+            {/* Workspace Toolbar */}
+            <WorkspaceToolbar
+              searchQuery={searchQuery}
+              onSearchChange={(q) => {
+                setSearchQuery(q);
+                setCurrentPage(1);
+              }}
+              quickFilter={quickFilter}
+              onQuickFilterChange={handleQuickFilterChange}
+              stageFilter={stageFilter}
+              onStageFilterChange={(st) => {
+                setStageFilter(st);
+                setCurrentPage(1);
+              }}
+              sortBy={sortBy}
+              onSortChange={(s) => {
+                setSortBy(s);
+                setCurrentPage(1);
+              }}
+              viewMode={settings.viewMode}
+              onViewModeChange={(viewMode: ViewMode) =>
+                setSettings((prev) => ({ ...prev, viewMode }))
+              }
+              counts={{
+                all: applications.length,
+                dueToday: dueTodayApps.length,
+                overdue: overdueApps.length,
+                idle: idleApps.length,
+                interviews: upcomingInterviews.length,
+              }}
+              onExportJson={handleExportJson}
+              onImportJson={handleImportJson}
+              onReloadFromStorage={handleReloadFromStorage}
+            />
+
+            {/* Application Grid or Ledger */}
+            {filteredApplications.length === 0 ? (
+              <div className="rounded-lg bg-white px-6 py-14 text-center">
+                <h2 className="font-serif text-xl font-semibold text-[#141923]">
+                  No applications match this view
+                </h2>
+                <p className="mx-auto mt-2 max-w-md text-sm text-[#4D5566]">
+                  Clear your active filters or log a new job application to start tracking follow-up
+                  dates and interview schedules.
+                </p>
+                <div className="mt-6 flex items-center justify-center gap-3">
+                  {(quickFilter !== 'all' || stageFilter !== 'All' || searchQuery) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickFilter('all');
+                        setStageFilter('All');
+                        setSearchQuery('');
+                        setActiveNav('all');
+                        setCurrentPage(1);
+                      }}
+                      className="rounded-md bg-[#E3E7F0] px-4 py-2 text-sm font-medium text-[#094CB2] hover:bg-[#D8DDE9] cursor-pointer"
+                    >
+                      Reset Filters
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => openNewApplicationModal(false)}
+                    className="inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-[#094CB2] to-[#1D63D0] px-4 py-2 text-sm font-medium text-white hover:opacity-95 cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                    <span>Log Application</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {settings.viewMode === 'board' ? (
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+                    {paginatedApplications.map((app) => (
+                      <ApplicationCard
+                        key={app.id}
+                        application={app}
+                        idleThresholdDays={settings.idleThresholdDays}
+                        onOpenDossier={(selected) => setSelectedDossierId(selected.id)}
+                        onEdit={openEditModal}
+                        onUpdateFollowUp={handleUpdateFollowUp}
+                        onMarkFollowedUp={handleMarkFollowedUp}
+                        onStageChange={handleStageChange}
+                        onSaveJdInsights={handleSaveJdInsights}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <ApplicationLedger
+                    applications={paginatedApplications}
+                    idleThresholdDays={settings.idleThresholdDays}
+                    onOpenDossier={(selected) => setSelectedDossierId(selected.id)}
+                    onEdit={openEditModal}
+                    onUpdateFollowUp={handleUpdateFollowUp}
+                    onMarkFollowedUp={handleMarkFollowedUp}
+                    onStageChange={handleStageChange}
+                  />
+                )}
+
+                <Pagination
+                  currentPage={safePage}
+                  totalPages={totalPages}
+                  totalItems={filteredApplications.length}
+                  pageSize={settings.pageSize}
+                  onPageChange={(page) => {
+                    setCurrentPage(page);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  onPageSizeChange={(pageSize) => {
+                    setSettings((prev) => ({ ...prev, pageSize }));
+                    setCurrentPage(1);
+                  }}
+                />
+              </>
+            )}
+          </>
+          )}
+        </main>
+      </div>
 
       {/* Modals & Drawers */}
       <ApplicationModal
         isOpen={modalOpen}
         initialApplication={editingApp}
         focusInterviewFields={scheduleInterviewMode}
+        resumePresets={resumePresets}
+        onAddResumePreset={handleAddResumePreset}
         onClose={() => {
           setModalOpen(false);
           setEditingApp(null);
@@ -574,6 +790,7 @@ export default function App() {
         onMarkFollowedUp={handleMarkFollowedUp}
         onStageChange={handleStageChange}
         onSaveJdInsights={handleSaveJdInsights}
+        onExportIcsNotice={setToastMessage}
       />
 
       {/* Quiet Toast Feedback */}

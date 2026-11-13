@@ -3,6 +3,7 @@ import {
   AlertCircle,
   Calendar,
   CalendarClock,
+  CalendarPlus,
   Check,
   CheckCircle2,
   Clock,
@@ -34,6 +35,7 @@ import {
   isApplicationIdle,
   isUpcomingInterview,
 } from '../utils/dateUtils';
+import { downloadIcsFile, generateIcsCalendar, slugifyFilename } from '../utils/icsExport';
 import { analyzeJobDescription } from '../utils/jdAnalysis';
 
 interface ApplicationDrawerProps {
@@ -49,6 +51,7 @@ interface ApplicationDrawerProps {
     jobDescription: string,
     aiInsights?: JobDescriptionInsights
   ) => void;
+  onExportIcsNotice?: (message: string) => void;
 }
 
 export function ApplicationDrawer({
@@ -60,6 +63,7 @@ export function ApplicationDrawer({
   onMarkFollowedUp,
   onStageChange,
   onSaveJdInsights,
+  onExportIcsNotice,
 }: ApplicationDrawerProps) {
   const [jdDraft, setJdDraft] = useState(application?.jobDescription ?? '');
   const [analyzing, setAnalyzing] = useState(false);
@@ -161,6 +165,14 @@ export function ApplicationDrawer({
                 <span aria-hidden="true">·</span>
                 <span className="font-medium text-[#141923] tabular-nums">
                   {application.compensation}
+                </span>
+              </>
+            )}
+            {application.resumeVersion && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="font-label font-semibold text-[#094CB2]">
+                  {application.resumeVersion}
                 </span>
               </>
             )}
@@ -268,9 +280,23 @@ export function ApplicationDrawer({
           {/* Interview Schedule */}
           {hasInterview && application.interviewDate && (
             <div className="mt-4 rounded-md bg-[#FBF6DC] p-4">
-              <div className="flex items-center gap-2 font-label text-xs font-semibold text-[#6D5E00]">
-                <Calendar className="h-4 w-4" aria-hidden="true" />
-                <span>Upcoming Interview Briefing</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 font-label text-xs font-semibold text-[#6D5E00]">
+                  <Calendar className="h-4 w-4" aria-hidden="true" />
+                  <span>Upcoming Interview Briefing</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ics = generateIcsCalendar([application]);
+                    downloadIcsFile(ics, `${slugifyFilename(application.company)}-interview.ics`);
+                    onExportIcsNotice?.(`Exported calendar invite for ${application.company}`);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-sm bg-white px-2.5 py-1 font-label text-[11px] font-semibold text-[#094CB2] hover:bg-[#F3F5F9] cursor-pointer"
+                >
+                  <CalendarPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Export .ics</span>
+                </button>
               </div>
               <p className="mt-2 font-serif text-base font-semibold text-[#141923] tabular-nums">
                 {formatRelativeDayLabel(application.interviewDate, todayISO)}

@@ -1,8 +1,25 @@
-import { AppSettings, ApplicationStage, JobApplication, WorkMode } from '../types/application';
+import {
+  AppSettings,
+  ApplicationPrepRecord,
+  ApplicationStage,
+  JobApplication,
+  MockInterviewSession,
+  PrepQuestionItem,
+  WorkMode,
+} from '../types/application';
 import { addDaysToISO, getTodayISO } from './dateUtils';
 
 export const STORAGE_KEY = 'bitemyjob_applications_v1';
 export const SETTINGS_STORAGE_KEY = 'bitemyjob_settings_v1';
+export const RESUME_PRESETS_STORAGE_KEY = 'bitemyjob_resume_presets_v1';
+export const MOCK_SESSIONS_STORAGE_KEY = 'bitemyjob_mock_sessions_v1';
+
+export const DEFAULT_RESUME_PRESETS = [
+  'v3-Systems-Lead',
+  'v2-Product-Design',
+  'v3-Frontend-Core',
+  'v1-General-SWE',
+];
 
 const LEGACY_KEYS = ['bitemyjob_applications', 'bitemyjob_data', 'job_applications', 'applications'];
 
@@ -85,6 +102,13 @@ export function normalizeApplication(raw: Record<string, unknown>, index = 0): J
           ? raw.title.trim()
           : 'Open Role',
     stage: normalizeStage(raw.stage ?? raw.status),
+    highestStageReached: raw.highestStageReached
+      ? normalizeStage(raw.highestStageReached)
+      : undefined,
+    resumeVersion:
+      typeof raw.resumeVersion === 'string' && raw.resumeVersion.trim()
+        ? raw.resumeVersion.trim()
+        : undefined,
     location: typeof raw.location === 'string' ? raw.location : 'San Francisco, CA',
     workMode: normalizeWorkMode(raw.workMode),
     compensation: typeof raw.compensation === 'string' ? raw.compensation : typeof raw.salary === 'string' ? raw.salary : undefined,
@@ -136,6 +160,8 @@ export function createSeedApplications(): JobApplication[] {
       company: 'Linear',
       role: 'Staff Product Designer, Editorial Systems',
       stage: 'Interview',
+      highestStageReached: 'Interview',
+      resumeVersion: 'v2-Product-Design',
       location: 'San Francisco, CA',
       workMode: 'Remote',
       compensation: '$210k – $245k',
@@ -158,6 +184,8 @@ export function createSeedApplications(): JobApplication[] {
       company: 'Stripe',
       role: 'Senior Frontend Engineer, Checkout',
       stage: 'Interview',
+      highestStageReached: 'Interview',
+      resumeVersion: 'v3-Systems-Lead',
       location: 'Seattle, WA',
       workMode: 'Hybrid',
       compensation: '$195k – $230k',
@@ -180,6 +208,8 @@ export function createSeedApplications(): JobApplication[] {
       company: 'The Atlantic',
       role: 'Lead Design Technologist',
       stage: 'Screening',
+      highestStageReached: 'Screening',
+      resumeVersion: 'v2-Product-Design',
       location: 'New York, NY',
       workMode: 'Hybrid',
       compensation: '$175k – $205k',
@@ -202,6 +232,8 @@ export function createSeedApplications(): JobApplication[] {
       company: 'Anthropic',
       role: 'Product Engineer, Research Surfaces',
       stage: 'Applied',
+      highestStageReached: 'Applied',
+      resumeVersion: 'v3-Frontend-Core',
       location: 'San Francisco, CA',
       workMode: 'Hybrid',
       compensation: '$220k – $260k',
@@ -219,6 +251,8 @@ export function createSeedApplications(): JobApplication[] {
       company: 'Notion',
       role: 'Senior UI Engineer, Publishing',
       stage: 'Screening',
+      highestStageReached: 'Screening',
+      resumeVersion: 'v3-Frontend-Core',
       location: 'San Francisco, CA',
       workMode: 'Hybrid',
       compensation: '$190k – $225k',
@@ -240,6 +274,8 @@ export function createSeedApplications(): JobApplication[] {
       company: 'Readwise',
       role: 'Founding Frontend Architect',
       stage: 'Applied',
+      highestStageReached: 'Applied',
+      resumeVersion: 'v3-Frontend-Core',
       location: 'Remote',
       workMode: 'Remote',
       compensation: '$180k – $210k',
@@ -256,6 +292,8 @@ export function createSeedApplications(): JobApplication[] {
       company: 'Figma',
       role: 'Staff UI Systems Engineer',
       stage: 'Offer',
+      highestStageReached: 'Offer',
+      resumeVersion: 'v3-Systems-Lead',
       location: 'San Francisco, CA',
       workMode: 'Hybrid',
       compensation: '$235k + Equity',
@@ -273,6 +311,8 @@ export function createSeedApplications(): JobApplication[] {
       company: 'Substack',
       role: 'Senior Product Engineer, Reader',
       stage: 'Saved',
+      highestStageReached: 'Saved',
+      resumeVersion: 'v2-Product-Design',
       location: 'Remote',
       workMode: 'Remote',
       compensation: '$175k – $200k',
@@ -339,18 +379,24 @@ export function loadSettings(): AppSettings {
   const defaults: AppSettings = {
     idleThresholdDays: 7,
     viewMode: 'board',
+    pageSize: 6,
   };
   if (typeof window === 'undefined') return defaults;
   try {
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw);
+    const allowedPageSizes = [6, 9, 12, 24];
     return {
       idleThresholdDays:
         typeof parsed.idleThresholdDays === 'number' && parsed.idleThresholdDays >= 1
           ? parsed.idleThresholdDays
           : 7,
       viewMode: parsed.viewMode === 'ledger' ? 'ledger' : 'board',
+      pageSize:
+        typeof parsed.pageSize === 'number' && allowedPageSizes.includes(parsed.pageSize)
+          ? parsed.pageSize
+          : 6,
     };
   } catch {
     return defaults;
@@ -365,3 +411,154 @@ export function saveSettings(settings: AppSettings): void {
     // Ignore storage errors
   }
 }
+
+export const PREP_STORAGE_KEY = 'bitemyjob_prep_v1';
+
+export function createDefaultPrepRecord(app: JobApplication): ApplicationPrepRecord {
+  const aiQuestions: PrepQuestionItem[] = (app.aiInsights?.interviewQuestions ?? []).map(
+    (q, idx) => ({
+      id: `ai-q-${app.id}-${idx}`,
+      question: q,
+      answerDraft: '',
+      rehearsed: false,
+      source: 'ai',
+    })
+  );
+
+  const starterQuestions: PrepQuestionItem[] =
+    aiQuestions.length > 0
+      ? aiQuestions
+      : [
+          {
+            id: `tpl-q-${app.id}-1`,
+            question: `Walk through a recent project relevant to ${app.role} at ${app.company} and the measurable impact you drove.`,
+            answerDraft: '',
+            rehearsed: false,
+            source: 'template',
+          },
+          {
+            id: `tpl-q-${app.id}-2`,
+            question: `What architectural or product trade-offs did you make under tight constraints, and how would you approach them today?`,
+            answerDraft: '',
+            rehearsed: false,
+            source: 'template',
+          },
+          {
+            id: `tpl-q-${app.id}-3`,
+            question: `Why ${app.company}, and what draws you specifically to this team at this stage?`,
+            answerDraft: '',
+            rehearsed: false,
+            source: 'template',
+          },
+        ];
+
+  return {
+    applicationId: app.id,
+    elevatorPitch: '',
+    questionsToAsk:
+      '• What does success look like in the first 90 days for this role?\n• How does the team balance rapid iteration with long-term quality?\n• What is the biggest technical or product challenge ahead next quarter?',
+    checklist: [
+      {
+        id: `chk-${app.id}-1`,
+        label: `Review ${app.company} recent product launches & engineering/design blog`,
+        completed: false,
+      },
+      {
+        id: `chk-${app.id}-2`,
+        label: 'Map 3 concrete STAR stories to core role competencies',
+        completed: false,
+      },
+      {
+        id: `chk-${app.id}-3`,
+        label: 'Rehearse 60-second introduction and portfolio/code walkthrough',
+        completed: false,
+      },
+      {
+        id: `chk-${app.id}-4`,
+        label: 'Prepare thoughtful questions for the hiring manager & panel',
+        completed: false,
+      },
+      {
+        id: `chk-${app.id}-5`,
+        label: 'Test audio, lighting, screen-share permissions, and calendar link',
+        completed: false,
+      },
+    ],
+    practiceQuestions: starterQuestions,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function loadPrepRecords(): Record<string, ApplicationPrepRecord> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(PREP_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, ApplicationPrepRecord>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+export function savePrepRecords(records: Record<string, ApplicationPrepRecord>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PREP_STORAGE_KEY, JSON.stringify(records));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function loadResumePresets(): string[] {
+  if (typeof window === 'undefined') return DEFAULT_RESUME_PRESETS;
+  try {
+    const raw = window.localStorage.getItem(RESUME_PRESETS_STORAGE_KEY);
+    if (!raw) return DEFAULT_RESUME_PRESETS;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const cleaned = parsed.filter(
+        (item): item is string => typeof item === 'string' && item.trim().length > 0
+      );
+      return cleaned.length > 0 ? cleaned : DEFAULT_RESUME_PRESETS;
+    }
+    return DEFAULT_RESUME_PRESETS;
+  } catch {
+    return DEFAULT_RESUME_PRESETS;
+  }
+}
+
+export function saveResumePresets(presets: string[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(RESUME_PRESETS_STORAGE_KEY, JSON.stringify(presets));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function loadMockSessions(): MockInterviewSession[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(MOCK_SESSIONS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as MockInterviewSession[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveMockSessions(sessions: MockInterviewSession[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(MOCK_SESSIONS_STORAGE_KEY, JSON.stringify(sessions));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+

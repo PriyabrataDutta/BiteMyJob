@@ -2,5 +2,7 @@
   "name": "BiteMyJob",
   "description": "An editorial career ledger and job application tracker with follow-up scheduling, Due Today and Overdue badges, idle application alerts, and an upcoming interviews summary strip.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

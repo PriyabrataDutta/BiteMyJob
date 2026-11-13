@@ -1,8 +1,21 @@
+# Dependencies
 node_modules/
+
+# Build & compilation artifacts
 build/
 dist/
+server.js
+*.tsbuildinfo
+
+# Test & coverage outputs
 coverage/
-.DS_Store
-*.log
+
+# Environment variables (keep template)
+.env
 .env*
 !.env.example
+
+# Logs & OS files
+*.log
+.DS_Store
+Thumbs.db

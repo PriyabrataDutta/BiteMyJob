@@ -12,6 +12,8 @@ interface ApplicationModalProps {
   isOpen: boolean;
   initialApplication: JobApplication | null;
   focusInterviewFields?: boolean;
+  resumePresets?: string[];
+  onAddResumePreset?: (preset: string) => void;
   onClose: () => void;
   onSave: (data: Omit<JobApplication, 'id' | 'createdAt' | 'updatedAt'>, existingId?: string) => void;
   onDelete?: (id: string) => void;
@@ -23,6 +25,8 @@ export function ApplicationModal({
   isOpen,
   initialApplication,
   focusInterviewFields = false,
+  resumePresets = [],
+  onAddResumePreset,
   onClose,
   onSave,
   onDelete,
@@ -46,6 +50,7 @@ export function ApplicationModal({
   const [interviewTime, setInterviewTime] = useState('');
   const [interviewRound, setInterviewRound] = useState('');
   const [interviewFormat, setInterviewFormat] = useState('');
+  const [resumeVersion, setResumeVersion] = useState('');
   const [notes, setNotes] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -70,6 +75,7 @@ export function ApplicationModal({
       setInterviewTime(initialApplication.interviewTime ?? '');
       setInterviewRound(initialApplication.interviewRound ?? '');
       setInterviewFormat(initialApplication.interviewFormat ?? '');
+      setResumeVersion(initialApplication.resumeVersion ?? '');
       setNotes(initialApplication.notes);
     } else {
       setCompany('');
@@ -89,6 +95,7 @@ export function ApplicationModal({
       setInterviewTime(focusInterviewFields ? '10:00' : '');
       setInterviewRound(focusInterviewFields ? 'Hiring Manager Sync' : '');
       setInterviewFormat(focusInterviewFields ? 'Zoom · 45 min' : '');
+      setResumeVersion('');
       setNotes('');
     }
   }, [isOpen, initialApplication, focusInterviewFields, todayISO]);
@@ -98,12 +105,17 @@ export function ApplicationModal({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!company.trim() || !role.trim()) return;
+    const trimmedResume = resumeVersion.trim();
+    if (trimmedResume && onAddResumePreset && !resumePresets.includes(trimmedResume)) {
+      onAddResumePreset(trimmedResume);
+    }
 
     onSave(
       {
         company: company.trim(),
         role: role.trim(),
         stage,
+        resumeVersion: trimmedResume || undefined,
         workMode,
         location: location.trim() || 'Remote',
         compensation: compensation.trim() || undefined,
@@ -278,6 +290,57 @@ export function ApplicationModal({
                 className="w-full rounded-md bg-white px-3 py-2 text-sm text-[#141923] ghost-border ghost-border-focus"
               />
             </div>
+          </div>
+
+          {/* Resume Version Tagging (Editable Input + Saved Presets) */}
+          <div className="rounded-md bg-[#F3F5F9] p-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <label
+                htmlFor="resume-version-input"
+                className="font-label text-xs font-semibold text-[#141923]"
+              >
+                Resume Version
+              </label>
+              <span className="text-[11px] text-[#4D5566]">
+                Type any custom version or choose a saved preset
+              </span>
+            </div>
+            <input
+              id="resume-version-input"
+              type="text"
+              list="resume-version-presets"
+              value={resumeVersion}
+              onChange={(e) => setResumeVersion(e.target.value)}
+              placeholder="e.g., v3-Systems-Lead"
+              className="mt-2 w-full rounded-md bg-white px-3 py-2 text-sm text-[#141923] ghost-border ghost-border-focus"
+            />
+            <datalist id="resume-version-presets">
+              {resumePresets.map((preset) => (
+                <option key={preset} value={preset} />
+              ))}
+            </datalist>
+            {resumePresets.length > 0 && (
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                <span className="font-label text-[11px] text-[#4D5566]">Saved presets:</span>
+                {resumePresets.map((preset) => {
+                  const selected = resumeVersion.trim() === preset;
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setResumeVersion(preset)}
+                      className={`rounded-sm px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                        selected
+                          ? 'bg-[#094CB2] text-white'
+                          : 'bg-white text-[#4D5566] hover:bg-[#E3E7F0] hover:text-[#094CB2]'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Dates & Follow-up Cadence */}

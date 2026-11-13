@@ -1,4 +1,4 @@
-import { Calendar, Clock, ArrowUpRight, Plus } from 'lucide-react';
+import { Calendar, CalendarPlus, Clock, ArrowUpRight, Plus, Download } from 'lucide-react';
 import { JobApplication } from '../types/application';
 import {
   diffCalendarDays,
@@ -6,12 +6,14 @@ import {
   formatTime12h,
   getTodayISO,
 } from '../utils/dateUtils';
+import { downloadIcsFile, generateIcsCalendar, slugifyFilename } from '../utils/icsExport';
 
 interface InterviewsStripProps {
   interviews: JobApplication[];
   onSelectApplication: (app: JobApplication) => void;
   onScheduleInterview: () => void;
   onViewAllInterviews: () => void;
+  onExportIcsNotice?: (message: string) => void;
 }
 
 export function InterviewsStrip({
@@ -19,8 +21,22 @@ export function InterviewsStrip({
   onSelectApplication,
   onScheduleInterview,
   onViewAllInterviews,
+  onExportIcsNotice,
 }: InterviewsStripProps) {
   const todayISO = getTodayISO();
+
+  const handleExportSingle = (app: JobApplication) => {
+    const ics = generateIcsCalendar([app]);
+    downloadIcsFile(ics, `${slugifyFilename(app.company)}-interview.ics`);
+    onExportIcsNotice?.(`Exported calendar invite for ${app.company}`);
+  };
+
+  const handleExportAll = () => {
+    if (interviews.length === 0) return;
+    const ics = generateIcsCalendar(interviews);
+    downloadIcsFile(ics, `bitemyjob-upcoming-interviews-${todayISO}.ics`);
+    onExportIcsNotice?.(`Exported ${interviews.length} upcoming interviews (.ics)`);
+  };
 
   return (
     <section
@@ -37,15 +53,25 @@ export function InterviewsStrip({
           </span>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           {interviews.length > 0 && (
-            <button
-              type="button"
-              onClick={onViewAllInterviews}
-              className="text-xs font-medium text-[#094CB2] hover:underline underline-offset-4 whitespace-nowrap cursor-pointer"
-            >
-              Focus interview queue
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={onViewAllInterviews}
+                className="text-xs font-medium text-[#094CB2] hover:underline underline-offset-4 whitespace-nowrap cursor-pointer"
+              >
+                Focus interview queue
+              </button>
+              <button
+                type="button"
+                onClick={handleExportAll}
+                className="inline-flex items-center gap-1.5 rounded-sm bg-white px-3 py-1.5 text-xs font-medium text-[#094CB2] transition-colors hover:bg-[#F3F5F9] whitespace-nowrap cursor-pointer"
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Export All (.ics)</span>
+              </button>
+            </>
           )}
           <button
             type="button"
@@ -87,13 +113,15 @@ export function InterviewsStrip({
             const timeLabel = app.interviewTime ? formatTime12h(app.interviewTime) : 'Time TBD';
 
             return (
-              <button
+              <div
                 key={app.id}
-                type="button"
-                onClick={() => onSelectApplication(app)}
-                className="group flex min-w-[270px] max-w-[320px] shrink-0 flex-col justify-between rounded-md bg-white p-4 text-left transition-all duration-150 hover:bg-[#FAFBFD] hover:-translate-y-0.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#094CB2]"
+                className="group flex min-w-[280px] max-w-[330px] shrink-0 flex-col justify-between rounded-md bg-white p-4 transition-all duration-150 hover:bg-[#FAFBFD]"
               >
-                <div>
+                <button
+                  type="button"
+                  onClick={() => onSelectApplication(app)}
+                  className="text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#094CB2]"
+                >
                   <div className="flex items-center justify-between gap-2">
                     <span
                       className={`inline-flex items-center gap-1.5 rounded-sm px-2 py-0.5 font-label text-[11px] font-semibold tabular-nums ${
@@ -126,20 +154,32 @@ export function InterviewsStrip({
                       aria-hidden="true"
                     />
                   </div>
-                </div>
+                </button>
 
-                <div className="mt-3 flex items-center gap-2 text-xs text-[#4D5566] truncate">
-                  <span className="font-medium text-[#141923] truncate">
-                    {app.interviewRound || 'Interview Session'}
-                  </span>
-                  {app.interviewFormat && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span className="truncate">{app.interviewFormat}</span>
-                    </>
-                  )}
+                <div className="mt-3 flex items-center justify-between gap-2 pt-1">
+                  <div className="min-w-0 flex items-center gap-1.5 text-xs text-[#4D5566] truncate">
+                    <span className="font-medium text-[#141923] truncate">
+                      {app.interviewRound || 'Interview Session'}
+                    </span>
+                    {app.interviewFormat && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="truncate">{app.interviewFormat}</span>
+                      </>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleExportSingle(app)}
+                    title={`Download .ics invite for ${app.company}`}
+                    className="inline-flex items-center gap-1 rounded-sm bg-[#F3F5F9] px-2 py-1 font-label text-[11px] font-medium text-[#094CB2] transition-colors hover:bg-[#E3E7F0] whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <CalendarPlus className="h-3 w-3" aria-hidden="true" />
+                    <span>.ics</span>
+                  </button>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

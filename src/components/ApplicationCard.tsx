@@ -181,6 +181,14 @@ export function ApplicationCard({
               </span>
             </>
           )}
+          {application.resumeVersion && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="font-label font-medium text-[#094CB2]">
+                {application.resumeVersion}
+              </span>
+            </>
+          )}
         </div>
 
         {/* Status Badges: Due Today, Overdue, Idle Alert */}

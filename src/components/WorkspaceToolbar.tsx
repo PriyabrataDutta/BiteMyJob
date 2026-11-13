@@ -1,4 +1,4 @@
-import { Search, LayoutGrid, List, Download, Upload } from 'lucide-react';
+import { Search, LayoutGrid, List, Download, Upload, RefreshCw } from 'lucide-react';
 import { ChangeEvent, useRef } from 'react';
 import {
   ALL_STAGES,
@@ -29,6 +29,7 @@ interface WorkspaceToolbarProps {
   };
   onExportJson: () => void;
   onImportJson: (file: File) => void;
+  onReloadFromStorage: () => void;
 }
 
 export function WorkspaceToolbar({
@@ -45,6 +46,7 @@ export function WorkspaceToolbar({
   counts,
   onExportJson,
   onImportJson,
+  onReloadFromStorage,
 }: WorkspaceToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -177,8 +179,17 @@ export function WorkspaceToolbar({
             </button>
           </div>
 
-          {/* Export / Import Backup */}
+          {/* localStorage Load & Export / Import Backup */}
           <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onReloadFromStorage}
+              title="Load saved data from localStorage"
+              className="inline-flex items-center gap-1 rounded-md bg-[#E3E7F0] px-2.5 py-1.5 text-xs font-medium text-[#094CB2] transition-colors hover:bg-[#D8DDE9] cursor-pointer"
+            >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="hidden xl:inline">Load Saved</span>
+            </button>
             <button
               type="button"
               onClick={onExportJson}
