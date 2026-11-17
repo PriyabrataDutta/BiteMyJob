@@ -10,14 +10,18 @@ const __dirname = path.dirname(__filename);
 
 const MODEL_ID = 'gemini-3.5-flash-lite';
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+function getAiClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) return null;
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
     },
-  },
-});
+  });
+}
 
 interface AnalyzeJdBody {
   company?: string;
@@ -65,7 +69,8 @@ async function startServer() {
 
   app.post('/api/analyze-jd', async (req: Request, res: Response) => {
     try {
-      if (!process.env.GEMINI_API_KEY) {
+      const ai = getAiClient();
+      if (!ai) {
         res.status(500).json({
           error: 'GEMINI_API_KEY is not configured on the server. Check Settings > Secrets.',
         });
@@ -185,7 +190,16 @@ async function startServer() {
     });
   }
 
-  const port = Number(process.env.PORT) || 3000;
+  const portArgIndex = process.argv.indexOf('--port');
+  const cliPort =
+    portArgIndex !== -1 && process.argv[portArgIndex + 1]
+      ? Number(process.argv[portArgIndex + 1])
+      : undefined;
+  const port =
+    (cliPort && Number.isFinite(cliPort) ? cliPort : undefined) ||
+    Number(process.env.PORT) ||
+    3000;
+
   app.listen(port, '0.0.0.0', () => {
     console.log(`BiteMyJob server running on http://0.0.0.0:${port}`);
   });
